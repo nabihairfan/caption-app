@@ -27,9 +27,9 @@ export default function Home() {
       <div className="fixed bottom-0 right-10 text-6xl opacity-20 pointer-events-none">🌷</div>
 
       <div className="text-center max-w-md">
-        <div className="text-8xl mb-6">😂</div>
+        <div className="text-8xl mb-6">💘</div>
         <h1 className="text-6xl font-black mb-4 bg-gradient-to-r from-pink-400 via-purple-400 to-yellow-400 bg-clip-text text-transparent">
-          Crackd
+          CaptionCrush
         </h1>
         <p className="text-gray-500 text-lg mb-2">AI-generated captions, rated by you.</p>
         <p className="text-gray-400 text-sm mb-8">Swipe, vote, and discover the funniest captions 🌸</p>
