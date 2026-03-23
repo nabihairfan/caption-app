@@ -49,7 +49,7 @@ export default function Captions() {
       .from("captions")
       .select(`id, content, like_count, is_featured, caption_requests(image_id, images(url))`)
       .order("like_count", { ascending: false })
-      .limit(50)
+      .limit(5000)
 
     const caps = (data || []).filter(c => c.caption_requests?.images?.url)
     setCaptions(caps)
