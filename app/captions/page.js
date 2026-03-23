@@ -51,7 +51,7 @@ export default function Captions() {
       .order("like_count", { ascending: false })
       .limit(50)
 
-    const caps = data || []
+    const caps = (data || []).filter(c => c.caption_requests?.images?.url)
     setCaptions(caps)
     setSpotlight(caps.find(c => c.is_featured) || caps[0])
     setLeaderboard(caps.slice(0, 10))
@@ -93,7 +93,9 @@ export default function Captions() {
     } else {
       await supabase.from("caption_votes").upsert({
         caption_id: captionId, profile_id: user.id,
-        user_id: user.id, vote_value: value, value: value
+        user_id: user.id, vote_value: value, value: value,
+        created_by_user_id: user.id,
+        modified_by_user_id: user.id,
       }, { onConflict: "caption_id,profile_id" })
       setVotes(prev => ({ ...prev, [captionId]: value }))
       // If switching from one vote to another, adjust by 2
@@ -141,6 +143,7 @@ export default function Captions() {
 
   const filtered = captions
     .filter(c => c.content?.toLowerCase().includes(search.toLowerCase()))
+    .filter(c => c.caption_requests?.images?.url)
     .sort((a, b) => sort === "likes" ? (b.like_count ?? 0) - (a.like_count ?? 0) : 0)
 
   if (loading) return (
