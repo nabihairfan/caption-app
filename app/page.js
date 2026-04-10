@@ -26,17 +26,38 @@ export default function Home() {
       <div className="fixed bottom-10 left-0 text-5xl opacity-20 pointer-events-none">🌼</div>
       <div className="fixed bottom-0 right-10 text-6xl opacity-20 pointer-events-none">🌷</div>
 
-      <div className="text-center max-w-md">
+      <div className="text-center max-w-md w-full">
         <div className="text-8xl mb-6">💘</div>
         <h1 className="text-6xl font-black mb-4 bg-gradient-to-r from-pink-400 via-purple-400 to-yellow-400 bg-clip-text text-transparent">
           CaptionCrush
         </h1>
         <p className="text-gray-500 text-lg mb-2">AI-generated captions, rated by you.</p>
-        <p className="text-gray-400 text-sm mb-8">Swipe, vote, and discover the funniest captions 🌸</p>
+        <p className="text-gray-400 text-sm mb-6">Swipe, vote, and discover the funniest captions 🌸</p>
+
+        {/* Sample caption preview */}
+        <div className="bg-white rounded-2xl p-4 mb-6 shadow-sm border border-pink-100 text-left">
+          <p className="text-xs text-purple-400 font-semibold uppercase tracking-wide mb-2">✨ Example caption</p>
+          <p className="text-gray-700 text-sm leading-relaxed mb-3">
+            "me explaining to my roommate why i ordered pizza at 2am: it's called self-care 🍕"
+          </p>
+          <div className="flex gap-2">
+            <div className="flex items-center gap-1 bg-pink-50 text-pink-400 text-xs px-3 py-1 rounded-full font-medium">👍 Funny</div>
+            <div className="flex items-center gap-1 bg-gray-50 text-gray-400 text-xs px-3 py-1 rounded-full font-medium">👎 Not for me</div>
+          </div>
+        </div>
+
+        {/* Sign-in required callout */}
+        <div className="bg-purple-50 border border-purple-100 rounded-xl px-4 py-3 mb-6 flex items-start gap-3 text-left">
+          <span className="text-purple-400 text-lg mt-0.5">🔒</span>
+          <div>
+            <p className="text-purple-700 text-sm font-semibold">Sign in to vote & upload</p>
+            <p className="text-purple-400 text-xs mt-0.5">You need a Google account to rate captions, battle, and upload your own photos.</p>
+          </div>
+        </div>
 
         <button
           onClick={signInWithGoogle}
-          className="bg-white text-gray-700 px-8 py-4 rounded-2xl font-bold text-lg hover:shadow-lg transition shadow-md flex items-center gap-3 mx-auto border border-pink-100"
+          className="bg-white text-gray-700 px-8 py-4 rounded-2xl font-bold text-lg hover:shadow-lg transition shadow-md flex items-center gap-3 mx-auto border border-pink-100 w-full justify-center"
         >
           <svg width="24" height="24" viewBox="0 0 24 24">
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -46,6 +67,7 @@ export default function Home() {
           </svg>
           Continue with Google
         </button>
+
         <p className="text-gray-400 text-xs mt-4">Free to use • No spam • Just vibes 🌺</p>
       </div>
     </main>

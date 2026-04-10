@@ -22,15 +22,24 @@ export default function Captions() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadingMsg, setLoadingMsg] = useState(LOADING_MESSAGES[0])
+  const [saved, setSaved] = useState({}) // { captionId: true/false }
 
-    useEffect(() => {
+  useEffect(() => {
     setLoadingMsg(LOADING_MESSAGES[Math.floor(Math.random() * LOADING_MESSAGES.length)])
-    }, [])
+    // Load saved captions from localStorage
+    const storedSaved = localStorage.getItem("savedCaptions")
+    if (storedSaved) setSaved(JSON.parse(storedSaved))
+    // Show onboarding if first visit
+    // Show onboarding every time on login
+    setShowOnboarding(true)
+  }, [])
+
   const [tab, setTab] = useState("swipe")
   const [currentIndex, setCurrentIndex] = useState(0)
   const [search, setSearch] = useState("")
   const [sort, setSort] = useState("likes")
   const [swipeDir, setSwipeDir] = useState(null)
+  const touchStartX = useRef(null)
   const [votes, setVotes] = useState({})
   const [leaderboard, setLeaderboard] = useState([])
   const [spotlight, setSpotlight] = useState(null)
@@ -38,20 +47,45 @@ export default function Captions() {
   const [battleWinner, setBattleWinner] = useState(null)
   const [battleHistory, setBattleHistory] = useState([])
   const [shareCaption, setShareCaption] = useState(null)
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [visibleCount, setVisibleCount] = useState(10)
 
   useEffect(() => { checkAndFetch() }, [])
+
+  useEffect(() => {
+    const handleFocus = () => checkAndFetch()
+    window.addEventListener("focus", handleFocus)
+    return () => window.removeEventListener("focus", handleFocus)
+  }, [])
 
   async function checkAndFetch() {
     const { data: { session } } = await supabase.auth.getSession()
     setUser(session?.user || null)
 
-    const { data } = await supabase
-      .from("captions")
-      .select(`id, content, like_count, is_featured, caption_requests(image_id, images(url))`)
-      .order("like_count", { ascending: false })
-      .limit(5000)
+    const [{ data: topLiked }, { data: recent }] = await Promise.all([
+      supabase
+        .from("captions")
+        .select(`id, content, like_count, is_featured, created_datetime_utc, caption_requests(image_id, images(url))`)
+        .order("like_count", { ascending: false })
+        .limit(5000),
+      supabase
+        .from("captions")
+        .select(`id, content, like_count, is_featured, created_datetime_utc, caption_requests(image_id, images(url))`)
+        .order("created_datetime_utc", { ascending: false })
+        .limit(500)
+    ])
 
-    const caps = (data || []).filter(c => c.caption_requests?.images?.url)
+    // Merge and deduplicate by caption id
+    const merged = [...(topLiked || []), ...(recent || [])]
+    const seen = new Set()
+    const deduped = merged.filter(c => {
+      if (seen.has(c.id)) return false
+      seen.add(c.id)
+      return true
+    })
+
+    // Also deduplicate by image so same image doesn't appear 50 times
+    const caps = deduped.filter(c => c.caption_requests?.images?.url)
     setCaptions(caps)
     setSpotlight(caps.find(c => c.is_featured) || caps[0])
     setLeaderboard(caps.slice(0, 10))
@@ -70,6 +104,39 @@ export default function Captions() {
     setLoading(false)
   }
 
+  function dismissOnboarding() {
+    setShowOnboarding(false)
+  }
+  function toggleSave(caption) {
+    setSaved(prev => {
+      const isAlreadySaved = prev[caption.id]
+      const updated = { ...prev, [caption.id]: !isAlreadySaved }
+      // Remove the key entirely if unsaving to keep storage clean
+      if (isAlreadySaved) delete updated[caption.id]
+      localStorage.setItem("savedCaptions", JSON.stringify(updated))
+      if (!isAlreadySaved) {
+        confetti({ particleCount: 40, spread: 50, origin: { y: 0.6 }, colors: ["#f9a8d4", "#c084fc", "#fbbf24"] })
+      }
+      return updated
+    })
+    // Also store the caption content so we can show it in the Saved tab
+    const storedData = localStorage.getItem("savedCaptionData")
+    const captionData = storedData ? JSON.parse(storedData) : {}
+    if (saved[caption.id]) {
+      delete captionData[caption.id]
+    } else {
+      captionData[caption.id] = caption
+    }
+    localStorage.setItem("savedCaptionData", JSON.stringify(captionData))
+  }
+
+  function getSavedCaptions() {
+    const storedData = localStorage.getItem("savedCaptionData")
+    if (!storedData) return []
+    const captionData = JSON.parse(storedData)
+    return Object.values(captionData)
+  }
+
   function pickBattlePair(caps) {
     const pool = caps || captions
     if (pool.length < 2) return
@@ -83,10 +150,8 @@ export default function Captions() {
     const existingVote = votes[captionId]
 
     if (existingVote === value) {
-      // Removing existing vote
       await supabase.from("caption_votes").delete().eq("caption_id", captionId).eq("profile_id", user.id)
       setVotes(prev => ({ ...prev, [captionId]: null }))
-      // Undo the effect of the vote
       setCaptions(prev => prev.map(c => c.id === captionId ? {
         ...c, like_count: (c.like_count ?? 0) + (value === 1 ? -1 : 1)
       } : c))
@@ -98,7 +163,6 @@ export default function Captions() {
         modified_by_user_id: user.id,
       }, { onConflict: "caption_id,profile_id" })
       setVotes(prev => ({ ...prev, [captionId]: value }))
-      // If switching from one vote to another, adjust by 2
       const adjustment = existingVote ? (value === 1 ? 2 : -2) : (value === 1 ? 1 : -1)
       setCaptions(prev => prev.map(c => c.id === captionId ? {
         ...c, like_count: (c.like_count ?? 0) + adjustment
@@ -144,7 +208,11 @@ export default function Captions() {
   const filtered = captions
     .filter(c => c.content?.toLowerCase().includes(search.toLowerCase()))
     .filter(c => c.caption_requests?.images?.url)
-    .sort((a, b) => sort === "likes" ? (b.like_count ?? 0) - (a.like_count ?? 0) : 0)
+    .sort((a, b) => {
+      if (sort === "likes") return (b.like_count ?? 0) - (a.like_count ?? 0)
+      if (sort === "newest") return new Date(b.created_datetime_utc) - new Date(a.created_datetime_utc)
+      return 0
+    })
 
   if (loading) return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-yellow-50 flex items-center justify-center">
@@ -157,6 +225,24 @@ export default function Captions() {
 
   const currentCaption = captions[currentIndex]
 
+  // Reusable save button component
+  function SaveButton({ caption, size = "sm" }) {
+    const isSaved = saved[caption.id]
+    return (
+      <button
+        onClick={() => toggleSave(caption)}
+        className={`${size === "lg" ? "px-4 py-2 text-sm" : "px-2 py-1 text-xs"} rounded-lg font-semibold transition ${
+          isSaved
+            ? "bg-yellow-400 text-white"
+            : "bg-yellow-50 text-yellow-600 hover:bg-yellow-100"
+        }`}
+        title={isSaved ? "Unsave caption" : "Save caption"}
+      >
+        {isSaved ? "🔖 Saved" : "🔖 Save"}
+      </button>
+    )
+  }
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-pink-50 via-purple-50 to-yellow-50">
       <div className="fixed top-0 left-0 text-6xl opacity-20 pointer-events-none select-none">🌸</div>
@@ -164,6 +250,54 @@ export default function Captions() {
       <div className="fixed bottom-10 left-0 text-5xl opacity-20 pointer-events-none select-none">🌼</div>
       <div className="fixed bottom-0 right-10 text-6xl opacity-20 pointer-events-none select-none">🌷</div>
 
+      {/* Onboarding Modal */}
+      {showOnboarding && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl">
+            <div className="text-center mb-6">
+              <div className="text-6xl mb-3">💘</div>
+              <h2 className="text-2xl font-black text-gray-800">Welcome to CaptionCrush!</h2>
+              <p className="text-gray-400 text-sm mt-2">Here's how it works</p>
+            </div>
+            <div className="space-y-4 mb-6">
+              <div className="flex items-start gap-3 bg-pink-50 rounded-2xl p-3">
+                <span className="text-2xl">💘</span>
+                <div>
+                  <p className="text-gray-800 font-semibold text-sm">Swipe</p>
+                  <p className="text-gray-500 text-xs">Flip through AI-generated captions and vote 👍 or 👎</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 bg-purple-50 rounded-2xl p-3">
+                <span className="text-2xl">⚔️</span>
+                <div>
+                  <p className="text-gray-800 font-semibold text-sm">Battle</p>
+                  <p className="text-gray-500 text-xs">Two captions go head to head — pick the funnier one!</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 bg-yellow-50 rounded-2xl p-3">
+                <span className="text-2xl">📸</span>
+                <div>
+                  <p className="text-gray-800 font-semibold text-sm">Upload</p>
+                  <p className="text-gray-500 text-xs">Upload your own photo and get AI captions generated for it</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 bg-green-50 rounded-2xl p-3">
+                <span className="text-2xl">🔖</span>
+                <div>
+                  <p className="text-gray-800 font-semibold text-sm">Save favorites</p>
+                  <p className="text-gray-500 text-xs">Bookmark captions you love and find them in the Saved tab</p>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={dismissOnboarding}
+              className="w-full bg-gradient-to-r from-pink-400 to-purple-400 text-white py-4 rounded-2xl font-black text-lg hover:opacity-90 transition"
+            >
+              Let's go! 🌸
+            </button>
+          </div>
+        </div>
+      )}
       {/* Share Modal */}
       {shareCaption && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShareCaption(null)}>
@@ -177,10 +311,48 @@ export default function Captions() {
               <p className="text-pink-400 text-center text-sm mt-2">💘 CaptionCrush</p>
             </div>
             <button
-              onClick={() => { navigator.clipboard.writeText(shareCaption.content); alert("Caption copied! 🌸") }}
+              onClick={async () => {
+                // Try to share with image on mobile
+                if (navigator.share) {
+                  try {
+                    // Fetch the image and convert to a file
+                    const imageUrl = shareCaption.caption_requests?.images?.url
+                    if (imageUrl) {
+                      const response = await fetch(imageUrl)
+                      const blob = await response.blob()
+                      const file = new File([blob], "caption.jpg", { type: blob.type })
+                      await navigator.share({
+                        title: "CaptionCrush 💘",
+                        text: shareCaption.content,
+                        files: [file]
+                      })
+                    } else {
+                      await navigator.share({
+                        title: "CaptionCrush 💘",
+                        text: shareCaption.content
+                      })
+                    }
+                    return
+                  } catch (err) {
+                    // If sharing with file fails, try without
+                    try {
+                      await navigator.share({
+                        title: "CaptionCrush 💘",
+                        text: shareCaption.content
+                      })
+                      return
+                    } catch (e) {
+                      // Fall through to clipboard copy
+                    }
+                  }
+                }
+                // Fallback for desktop — just copy text
+                navigator.clipboard.writeText(shareCaption.content)
+                alert("Caption copied! 🌸")
+              }}
               className="w-full bg-gradient-to-r from-pink-400 to-purple-400 text-white py-3 rounded-2xl font-bold hover:opacity-90 transition"
             >
-              📋 Copy Caption
+              📤 Share with Image
             </button>
             <button onClick={() => setShareCaption(null)} className="w-full mt-2 text-gray-400 text-sm py-2">Close</button>
           </div>
@@ -199,9 +371,7 @@ export default function Captions() {
           <div className="flex gap-2 items-center">
             {user ? (
               <>
-                <Link href="/upload" className="bg-purple-400 hover:bg-purple-500 text-white px-3 py-2 rounded-xl text-sm font-semibold transition">
-                  📸 Upload
-                </Link>
+
                 <Link href="/account" className="bg-pink-400 hover:bg-pink-500 text-white px-3 py-2 rounded-xl text-sm font-semibold transition">
                   👤 {user.user_metadata?.full_name?.split(" ")[0] || "Account"}
                 </Link>
@@ -215,18 +385,20 @@ export default function Captions() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-4 bg-white/60 backdrop-blur rounded-2xl p-1 shadow-sm">
+        <div className="flex gap-1 mb-4 bg-white/60 backdrop-blur rounded-2xl p-1 shadow-sm overflow-x-auto">
           {[
             { id: "swipe", label: "💘 Swipe" },
             { id: "battle", label: "⚔️ Battle" },
             { id: "browse", label: "🔍 Browse" },
             { id: "spotlight", label: "⭐ Spotlight" },
             { id: "leaderboard", label: "🏆 Top" },
+            { id: "saved", label: `🔖 Saved${Object.keys(saved).length > 0 ? ` (${Object.keys(saved).length})` : ""}` },
+            { id: "upload", label: "📸 Upload" },
           ].map(t => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`flex-1 py-2 rounded-xl text-xs font-semibold transition ${
+              className={`flex-shrink-0 flex-1 py-2 rounded-xl text-xs font-semibold transition ${
                 tab === t.id
                   ? "bg-gradient-to-r from-pink-400 to-purple-400 text-white shadow"
                   : "text-gray-500 hover:text-gray-700"
@@ -244,6 +416,8 @@ export default function Captions() {
           {tab === "browse" && <p className="text-gray-500 text-xs">🔍 Search and filter all captions</p>}
           {tab === "spotlight" && <p className="text-gray-500 text-xs">⭐ Today's featured caption of the day</p>}
           {tab === "leaderboard" && <p className="text-gray-500 text-xs">🏆 The most loved captions of all time</p>}
+          {tab === "saved" && <p className="text-gray-500 text-xs">🔖 Captions you've bookmarked — saved on this device</p>}
+          {tab === "upload" && <p className="text-gray-500 text-xs">📸 Upload a photo and get AI captions generated for it</p>}
         </div>
 
         {/* SWIPE TAB */}
@@ -252,16 +426,26 @@ export default function Captions() {
             {currentCaption ? (
               <div>
                 <p className="text-gray-400 text-sm mb-3">{currentIndex + 1} of {captions.length} captions</p>
-                <div className={`bg-white rounded-3xl shadow-xl overflow-hidden transition-all duration-300 ${
-                  swipeDir === "right" ? "translate-x-32 rotate-6 opacity-0" :
-                  swipeDir === "left" ? "-translate-x-32 -rotate-6 opacity-0" : ""
-                }`}>
+                <div
+                  className={`bg-white rounded-3xl shadow-xl overflow-hidden transition-all duration-300 ${
+                    swipeDir === "right" ? "translate-x-32 rotate-6 opacity-0" :
+                    swipeDir === "left" ? "-translate-x-32 -rotate-6 opacity-0" : ""
+                  }`}
+                  onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX }}
+                  onTouchEnd={(e) => {
+                    if (touchStartX.current === null) return
+                    const diff = e.changedTouches[0].clientX - touchStartX.current
+                    if (diff > 60) swipe(1)       // swiped right = upvote
+                    else if (diff < -60) swipe(-1) // swiped left = downvote
+                    touchStartX.current = null
+                  }}
+                >
                   {currentCaption.caption_requests?.images?.url && (
                     <div className="w-full h-72 overflow-hidden">
                       <img
                         src={currentCaption.caption_requests.images.url}
-                        alt="caption"className="w-full h-full object-contain bg-black"
-                        
+                        alt="caption"
+                        className="w-full h-full object-contain bg-black"
                         onError={(e) => e.target.style.display='none'}
                       />
                     </div>
@@ -270,7 +454,10 @@ export default function Captions() {
                     <p className="text-gray-800 text-xl font-medium leading-relaxed">{currentCaption.content}</p>
                     <div className="flex justify-between items-center mt-3">
                       <p className="text-gray-400 text-sm">❤️ {currentCaption.like_count ?? 0} likes</p>
-                      <button onClick={() => setShareCaption(currentCaption)} className="text-purple-400 text-sm hover:text-purple-600">Share 🔗</button>
+                      <div className="flex gap-2">
+                        <SaveButton caption={currentCaption} />
+                        <button onClick={() => setShareCaption(currentCaption)} className="text-purple-400 text-sm hover:text-purple-600">Share 🔗</button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -300,6 +487,12 @@ export default function Captions() {
         {/* BATTLE TAB */}
         {tab === "battle" && (
           <div>
+            {/* Instructions card */}
+            <div className="bg-white/60 backdrop-blur rounded-2xl px-4 py-3 mb-4 border border-pink-100">
+              <p className="text-gray-700 text-sm font-semibold mb-1">⚔️ How Battle works</p>
+              <p className="text-gray-500 text-xs leading-relaxed">Two captions go head to head. Pick the one you think is funnier — your winner stays and fights the next challenger. See how long your champion can survive!</p>
+            </div>
+
             <div className="text-center mb-4">
               {battleHistory.length > 0 && (
                 <div className="bg-white/60 rounded-2xl px-4 py-2 inline-block">
@@ -310,13 +503,8 @@ export default function Captions() {
 
             {battlePair.length === 2 ? (
               <div className="grid grid-cols-1 gap-4">
-                {battlePair.map((caption, i) => (
-                  <div key={caption.id}>
-                    {i === 1 && (
-                      <div className="text-center my-2">
-                        <span className="text-2xl font-black text-pink-400 bg-white/60 px-4 py-1 rounded-full">VS</span>
-                      </div>
-                    )}
+              {filtered.slice(0, visibleCount).map(caption => (
+                <div key={caption.id} className="bg-white rounded-2xl shadow-sm overflow-hidden border border-pink-100">
                     <div className={`bg-white rounded-3xl shadow-lg overflow-hidden border-2 transition-all duration-500 ${
                       battleWinner === caption.id ? "border-green-400 scale-105" :
                       battleWinner && battleWinner !== caption.id ? "border-red-200 opacity-50" :
@@ -336,7 +524,10 @@ export default function Captions() {
                         <p className="text-gray-800 font-medium text-lg mb-3 leading-relaxed">{caption.content}</p>
                         <div className="flex justify-between items-center">
                           <span className="text-gray-400 text-sm">❤️ {caption.like_count ?? 0}</span>
-                          {battleWinner === caption.id && <span className="text-green-500 font-bold">🏆 Winner!</span>}
+                          <div className="flex gap-2 items-center">
+                            {battleWinner === caption.id && <span className="text-green-500 font-bold">🏆 Winner!</span>}
+                            <SaveButton caption={caption} />
+                          </div>
                         </div>
                         {!battleWinner && user && (
                           <button
@@ -383,7 +574,7 @@ export default function Captions() {
                 className="flex-1 bg-white/80 border border-pink-200 rounded-xl px-4 py-2 text-gray-700 focus:outline-none focus:border-purple-400 placeholder-gray-400"
                 placeholder="🔍 Search captions..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setVisibleCount(10) }}
               />
               <select
                 className="bg-white/80 border border-pink-200 rounded-xl px-3 py-2 text-gray-700 focus:outline-none"
@@ -401,8 +592,8 @@ export default function Captions() {
                     <div className="w-full h-52 overflow-hidden">
                       <img
                         src={caption.caption_requests.images.url}
-                        alt=""className="w-full h-full object-contain bg-black"
-                        
+                        alt=""
+                        className="w-full h-full object-contain bg-black"
                         onError={(e) => e.target.style.display='none'}
                       />
                     </div>
@@ -413,6 +604,7 @@ export default function Captions() {
                     <div className="flex items-center justify-between">
                       <span className="text-gray-400 text-sm">❤️ {caption.like_count ?? 0}</span>
                       <div className="flex gap-2">
+                        <SaveButton caption={caption} />
                         <button onClick={() => setShareCaption(caption)} className="text-purple-400 text-xs px-2 py-1 rounded-lg hover:bg-purple-50">Share</button>
                         <button onClick={() => handleVote(caption.id, 1)} disabled={!user}
                           className={`px-3 py-1 rounded-lg text-sm font-semibold transition ${votes[caption.id] === 1 ? "bg-green-400 text-white" : "bg-green-50 text-green-600 hover:bg-green-100"} disabled:opacity-40`}>👍</button>
@@ -424,6 +616,14 @@ export default function Captions() {
                 </div>
               ))}
             </div>
+            {visibleCount < filtered.length && (
+              <button
+                onClick={() => setVisibleCount(prev => prev + 10)}
+                className="w-full mt-4 bg-white border border-pink-200 text-pink-500 py-3 rounded-2xl font-semibold hover:bg-pink-50 transition"
+              >
+                Load more captions ✨ ({filtered.length - visibleCount} remaining)
+              </button>
+            )}
           </div>
         )}
 
@@ -453,6 +653,7 @@ export default function Captions() {
             </div>
             <div className="flex justify-center gap-4">
               <p className="text-gray-500 text-sm">❤️ {spotlight.like_count ?? 0} likes</p>
+              <SaveButton caption={spotlight} size="lg" />
               <button onClick={() => setShareCaption(spotlight)} className="text-purple-400 text-sm">Share 🔗</button>
             </div>
           </div>
@@ -477,6 +678,7 @@ export default function Captions() {
                     <p className="text-gray-400 text-xs mt-1">❤️ {caption.like_count ?? 0} likes</p>
                   </div>
                   <div className="flex gap-1 flex-shrink-0">
+                    <SaveButton caption={caption} />
                     <button onClick={() => setShareCaption(caption)} className="text-purple-400 text-xs px-2 py-1">Share</button>
                     <button onClick={() => handleVote(caption.id, 1)} disabled={!user}
                       className={`px-2 py-1 rounded-lg text-sm transition ${votes[caption.id] === 1 ? "bg-green-400 text-white" : "bg-green-50 text-green-600"} disabled:opacity-40`}>👍</button>
@@ -485,6 +687,71 @@ export default function Captions() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* SAVED TAB */}
+        {tab === "saved" && (
+          <div>
+            {getSavedCaptions().length === 0 ? (
+              <div className="bg-white rounded-3xl p-12 shadow-xl text-center">
+                <p className="text-5xl mb-4">🔖</p>
+                <p className="text-gray-600 text-xl font-semibold">No saved captions yet!</p>
+                <p className="text-gray-400 text-sm mt-2">Hit the 🔖 Save button on any caption to bookmark it here.</p>
+                <button onClick={() => setTab("swipe")} className="mt-4 bg-gradient-to-r from-pink-400 to-purple-400 text-white px-6 py-3 rounded-xl font-bold">
+                  Start Swiping 💘
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                <p className="text-gray-400 text-sm text-center">{getSavedCaptions().length} saved caption{getSavedCaptions().length > 1 ? "s" : ""} • stored on this device</p>
+                {getSavedCaptions().map(caption => (
+                  <div key={caption.id} className="bg-white rounded-2xl shadow-sm overflow-hidden border border-yellow-200">
+                    {caption.caption_requests?.images?.url && (
+                      <div className="w-full h-52 overflow-hidden">
+                        <img
+                          src={caption.caption_requests.images.url}
+                          alt=""
+                          className="w-full h-full object-contain bg-black"
+                          onError={(e) => e.target.style.display='none'}
+                        />
+                      </div>
+                    )}
+                    <div className="p-4">
+                      <p className="text-gray-800 font-medium mb-3">{caption.content}</p>
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-400 text-sm">❤️ {caption.like_count ?? 0} likes</span>
+                        <div className="flex gap-2">
+                          <SaveButton caption={caption} />
+                          <button onClick={() => setShareCaption(caption)} className="text-purple-400 text-xs px-2 py-1 rounded-lg hover:bg-purple-50">Share</button>
+                          <button onClick={() => handleVote(caption.id, 1)} disabled={!user}
+                            className={`px-3 py-1 rounded-lg text-sm font-semibold transition ${votes[caption.id] === 1 ? "bg-green-400 text-white" : "bg-green-50 text-green-600 hover:bg-green-100"} disabled:opacity-40`}>👍</button>
+                          <button onClick={() => handleVote(caption.id, -1)} disabled={!user}
+                            className={`px-3 py-1 rounded-lg text-sm font-semibold transition ${votes[caption.id] === -1 ? "bg-red-400 text-white" : "bg-red-50 text-red-600 hover:bg-red-100"} disabled:opacity-40`}>👎</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* UPLOAD TAB */}
+        {tab === "upload" && (
+          <div className="text-center">
+            <div className="bg-white rounded-3xl p-8 shadow-xl border border-pink-100">
+              <div className="text-6xl mb-4">📸</div>
+              <h2 className="text-xl font-black text-gray-800 mb-2">Upload a Photo</h2>
+              <p className="text-gray-400 text-sm mb-6">Our AI will generate funny captions for your image</p>
+              <Link
+                href="/upload"
+                className="bg-gradient-to-r from-pink-400 to-purple-400 text-white px-8 py-4 rounded-2xl font-bold text-lg hover:opacity-90 transition inline-block"
+              >
+                Go to Upload Page 🌸
+              </Link>
             </div>
           </div>
         )}
