@@ -20,7 +20,9 @@ export default function Account() {
   const [user, setUser] = useState(null)
   const [uploads, setUploads] = useState([])
   const [voteCount, setVoteCount] = useState(0)
+  const [votedCaptions, setVotedCaptions] = useState([])
   const [loading, setLoading] = useState(true)
+  const [activeSection, setActiveSection] = useState("uploads")
   const [quote] = useState(QUOTES[new Date().getDay() % QUOTES.length])
 
   useEffect(() => { fetchData() }, [])
@@ -30,12 +32,31 @@ export default function Account() {
     if (!session) { router.push("/"); return }
     setUser(session.user)
 
+    // Fetch vote count
     const { data: voteData } = await supabase
       .from("caption_votes")
-      .select("id")
+      .select("id, vote_value, caption_id")
       .eq("profile_id", session.user.id)
     setVoteCount(voteData?.length || 0)
 
+    // Fetch voted captions with content and image
+    if (voteData && voteData.length > 0) {
+      const captionIds = voteData.map(v => v.caption_id)
+      const { data: captionDetails } = await supabase
+        .from("captions")
+        .select("id, content, like_count, caption_requests(image_id, images(url))")
+        .in("id", captionIds)
+        .limit(50)
+
+      // Merge vote_value into caption details
+      const withVotes = (captionDetails || []).map(c => ({
+        ...c,
+        vote_value: voteData.find(v => v.caption_id === c.id)?.vote_value
+      }))
+      setVotedCaptions(withVotes)
+    }
+
+    // Fetch uploads
     const { data: uploadData } = await supabase
       .from("caption_requests")
       .select("id, images(url), created_datetime_utc")
@@ -67,6 +88,7 @@ export default function Account() {
         <div className="flex justify-between items-center mb-8">
           <Link href="/captions" className="text-gray-400 hover:text-gray-600 transition">← Back</Link>
           <h1 className="text-2xl font-black bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">My Account</h1>
+          <div className="w-10" />
         </div>
 
         {/* Quote of the day */}
@@ -83,18 +105,24 @@ export default function Account() {
           </div>
           <h2 className="text-2xl font-black text-gray-800">{user?.user_metadata?.full_name || "User"}</h2>
           <p className="text-gray-400 mt-1">{user?.email}</p>
-
           <div className="grid grid-cols-2 gap-4 mt-6">
-            <div className="bg-pink-50 rounded-2xl p-4">
+            <button
+              onClick={() => setActiveSection("votes")}
+              className={`rounded-2xl p-4 transition ${activeSection === "votes" ? "bg-pink-200 ring-2 ring-pink-400" : "bg-pink-50 hover:bg-pink-100"}`}
+            >
               <p className="text-3xl font-black text-pink-500">{voteCount}</p>
               <p className="text-gray-500 text-sm mt-1">Total Votes Cast</p>
-            </div>
-            <div className="bg-purple-50 rounded-2xl p-4">
+              <p className="text-pink-400 text-xs mt-1">tap to see →</p>
+            </button>
+            <button
+              onClick={() => setActiveSection("uploads")}
+              className={`rounded-2xl p-4 transition ${activeSection === "uploads" ? "bg-purple-200 ring-2 ring-purple-400" : "bg-purple-50 hover:bg-purple-100"}`}
+            >
               <p className="text-3xl font-black text-purple-500">{uploads.length}</p>
               <p className="text-gray-500 text-sm mt-1">Images Uploaded</p>
-            </div>
+              <p className="text-purple-400 text-xs mt-1">tap to see →</p>
+            </button>
           </div>
-
           <button
             onClick={signOut}
             className="mt-6 w-full bg-gradient-to-r from-pink-400 to-purple-400 text-white py-3 rounded-2xl font-bold hover:opacity-90 transition"
@@ -103,36 +131,74 @@ export default function Account() {
           </button>
         </div>
 
-        {/* My uploads */}
-        <div className="bg-white rounded-3xl shadow-sm border border-pink-100 p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-black text-gray-800">My Uploads</h3>
-            <Link href="/upload" className="bg-pink-400 hover:bg-pink-500 text-white px-3 py-1 rounded-xl text-sm font-semibold transition">
-              + Upload
-            </Link>
-          </div>
-          {uploads.length > 0 ? (
-            <div className="grid grid-cols-3 gap-3">
-              {uploads.map((upload) => (
-                <div key={upload.id} className="rounded-2xl overflow-hidden border border-pink-100 aspect-square">
-                  {upload.images?.url ? (
-                    <img src={upload.images.url} alt="" className="w-full h-full object-cover" onError={(e) => e.target.style.display='none'} />
-                  ) : (
-                    <div className="w-full h-full bg-pink-50 flex items-center justify-center text-2xl">📸</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              <p className="text-4xl mb-2">📸</p>
-              <p className="text-gray-400">No uploads yet!</p>
-              <Link href="/upload" className="inline-block mt-3 bg-gradient-to-r from-pink-400 to-purple-400 text-white px-4 py-2 rounded-xl text-sm font-bold">
-                Upload your first image
+        {/* My Uploads section */}
+        {activeSection === "uploads" && (
+          <div className="bg-white rounded-3xl shadow-sm border border-pink-100 p-6 mb-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-black text-gray-800">My Uploads</h3>
+              <Link href="/upload" className="bg-pink-400 hover:bg-pink-500 text-white px-3 py-1 rounded-xl text-sm font-semibold transition">
+                + Upload
               </Link>
             </div>
-          )}
-        </div>
+            {uploads.length > 0 ? (
+              <div className="grid grid-cols-3 gap-3">
+                {uploads.map((upload) => (
+                  <div key={upload.id} className="rounded-2xl overflow-hidden border border-pink-100 aspect-square">
+                    {upload.images?.url ? (
+                      <img src={upload.images.url} alt="" className="w-full h-full object-cover" onError={(e) => e.target.style.display='none'} />
+                    ) : (
+                      <div className="w-full h-full bg-pink-50 flex items-center justify-center text-2xl">📸</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-4xl mb-2">📸</p>
+                <p className="text-gray-400">No uploads yet!</p>
+                <Link href="/upload" className="inline-block mt-3 bg-gradient-to-r from-pink-400 to-purple-400 text-white px-4 py-2 rounded-xl text-sm font-bold">
+                  Upload your first image
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* My Votes section */}
+        {activeSection === "votes" && (
+          <div className="bg-white rounded-3xl shadow-sm border border-pink-100 p-6 mb-6">
+            <h3 className="text-lg font-black text-gray-800 mb-4">My Votes</h3>
+            {votedCaptions.length > 0 ? (
+              <div className="grid grid-cols-1 gap-3">
+                {votedCaptions.map((caption) => (
+                  <div key={caption.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl p-3 border border-pink-100">
+                    {caption.caption_requests?.images?.url && (
+                      <img
+                        src={caption.caption_requests.images.url}
+                        alt=""
+                        className="w-14 h-14 rounded-xl object-cover flex-shrink-0"
+                        onError={(e) => e.target.style.display='none'}
+                      />
+                    )}
+                    <p className="text-gray-700 text-sm flex-1 leading-relaxed">{caption.content}</p>
+                    <span className={`text-xl flex-shrink-0 ${caption.vote_value === 1 ? "" : "grayscale"}`}>
+                      {caption.vote_value === 1 ? "👍" : "👎"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-4xl mb-2">🗳️</p>
+                <p className="text-gray-400">No votes yet!</p>
+                <button onClick={() => router.push("/captions")} className="inline-block mt-3 bg-gradient-to-r from-pink-400 to-purple-400 text-white px-4 py-2 rounded-xl text-sm font-bold">
+                  Start voting
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
     </main>
   )

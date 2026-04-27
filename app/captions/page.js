@@ -503,8 +503,13 @@ export default function Captions() {
 
             {battlePair.length === 2 ? (
               <div className="grid grid-cols-1 gap-4">
-              {filtered.slice(0, visibleCount).map(caption => (
-                <div key={caption.id} className="bg-white rounded-2xl shadow-sm overflow-hidden border border-pink-100">
+                {battlePair.map((caption, i) => (
+                  <div key={caption.id}>
+                    {i === 1 && (
+                      <div className="text-center my-2">
+                        <span className="text-2xl font-black text-pink-400 bg-white/60 px-4 py-1 rounded-full">VS</span>
+                      </div>
+                    )}
                     <div className={`bg-white rounded-3xl shadow-lg overflow-hidden border-2 transition-all duration-500 ${
                       battleWinner === caption.id ? "border-green-400 scale-105" :
                       battleWinner && battleWinner !== caption.id ? "border-red-200 opacity-50" :
