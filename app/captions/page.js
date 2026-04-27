@@ -667,28 +667,40 @@ export default function Captions() {
         {/* LEADERBOARD TAB */}
         {tab === "leaderboard" && (
           <div>
-            <div className="grid grid-cols-1 gap-3">
+            <div className="grid grid-cols-1 gap-4">
               {leaderboard.map((caption, i) => (
-                <div key={caption.id} className="bg-white rounded-2xl p-4 shadow-sm border border-pink-100 flex items-center gap-4">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-lg flex-shrink-0 ${
-                    i === 0 ? "bg-yellow-400 text-white" :
-                    i === 1 ? "bg-gray-300 text-white" :
-                    i === 2 ? "bg-orange-400 text-white" :
-                    "bg-pink-100 text-pink-600"
-                  }`}>
-                    {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : i + 1}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-gray-800 font-medium text-sm truncate">{caption.content}</p>
-                    <p className="text-gray-400 text-xs mt-1">❤️ {caption.like_count ?? 0} likes</p>
-                  </div>
-                  <div className="flex gap-1 flex-shrink-0">
-                    <SaveButton caption={caption} />
-                    <button onClick={() => setShareCaption(caption)} className="text-purple-400 text-xs px-2 py-1">Share</button>
-                    <button onClick={() => handleVote(caption.id, 1)} disabled={!user}
-                      className={`px-2 py-1 rounded-lg text-sm transition ${votes[caption.id] === 1 ? "bg-green-400 text-white" : "bg-green-50 text-green-600"} disabled:opacity-40`}>👍</button>
-                    <button onClick={() => handleVote(caption.id, -1)} disabled={!user}
-                      className={`px-2 py-1 rounded-lg text-sm transition ${votes[caption.id] === -1 ? "bg-red-400 text-white" : "bg-red-50 text-red-600"} disabled:opacity-40`}>👎</button>
+                <div key={caption.id} className="bg-white rounded-2xl shadow-sm border border-pink-100 overflow-hidden">
+                  {caption.caption_requests?.images?.url && (
+                    <div className="w-full h-48 overflow-hidden">
+                      <img
+                        src={caption.caption_requests.images.url}
+                        alt=""
+                        className="w-full h-full object-contain bg-black"
+                        onError={(e) => e.target.style.display='none'}
+                      />
+                    </div>
+                  )}
+                  <div className="p-4 flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-lg flex-shrink-0 ${
+                      i === 0 ? "bg-yellow-400 text-white" :
+                      i === 1 ? "bg-gray-300 text-white" :
+                      i === 2 ? "bg-orange-400 text-white" :
+                      "bg-pink-100 text-pink-600"
+                    }`}>
+                      {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : i + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-gray-800 font-medium text-sm">{caption.content}</p>
+                      <p className="text-gray-400 text-xs mt-1">❤️ {caption.like_count ?? 0} likes</p>
+                    </div>
+                    <div className="flex gap-1 flex-shrink-0">
+                      <SaveButton caption={caption} />
+                      <button onClick={() => setShareCaption(caption)} className="text-purple-400 text-xs px-2 py-1">Share</button>
+                      <button onClick={() => handleVote(caption.id, 1)} disabled={!user}
+                        className={`px-2 py-1 rounded-lg text-sm transition ${votes[caption.id] === 1 ? "bg-green-400 text-white" : "bg-green-50 text-green-600"} disabled:opacity-40`}>👍</button>
+                      <button onClick={() => handleVote(caption.id, -1)} disabled={!user}
+                        className={`px-2 py-1 rounded-lg text-sm transition ${votes[caption.id] === -1 ? "bg-red-400 text-white" : "bg-red-50 text-red-600"} disabled:opacity-40`}>👎</button>
+                    </div>
                   </div>
                 </div>
               ))}
